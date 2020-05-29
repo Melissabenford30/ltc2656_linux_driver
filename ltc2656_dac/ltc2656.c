@@ -223,7 +223,7 @@ static ssize_t dev_write(struct file *filep, const char *buffer, size_t len, lof
         	wait_event_interruptible(write_wait_queue, IS_BUFFER_AVAILABLE(available_a, available_b));
 		if ((available_a < LTC2656_BUFFER_SIZE) && IS_SPI_BUFFER_B)
 		{
-	     	   write_size =  (size_t)min(len, LTC2656_BUFFER_SIZE - available_a);
+	     	   write_size =  (size_t)min(total_write, LTC2656_BUFFER_SIZE - available_a);
              	   if (copy_from_user(info->data + OFFSET_A + available_a, buffer + buffer_offset , write_size))
 	     	   {
                 	return -EFAULT;
@@ -238,7 +238,7 @@ static ssize_t dev_write(struct file *filep, const char *buffer, size_t len, lof
 
                 if ((available_b < LTC2656_BUFFER_SIZE) && IS_SPI_BUFFER_A)
 		{
-             	   write_size =  (size_t)min(len, LTC2656_BUFFER_SIZE - available_b);
+             	   write_size =  (size_t)min(total_write, LTC2656_BUFFER_SIZE - available_b);
                    if (copy_from_user(info->data + OFFSET_B + available_b, buffer + buffer_offset , write_size))
                    {
                 	return -EFAULT;
