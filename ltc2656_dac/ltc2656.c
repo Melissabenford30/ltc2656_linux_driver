@@ -80,7 +80,8 @@ static bool last_spi_write_buffer = true;
 static void work_func(struct work_struct *work);
 static DECLARE_WORK(work, work_func);
 static int ltc2656_sample_write( void );
-char *ltc2656_sample_buffer;
+static char *ltc2656_sample_buffer;
+static uint32_t available_a, available_b;
 
 struct ltc2656_state
 {
@@ -106,13 +107,13 @@ enum
 	LTC2656_BUFFER_SIZE = 524288, //1sec on 32 16bit channel @ 8.192Khz
 };
 
-#define IS_WRITE_BUFFER_A(pos, len) ((pos <= LTC2656_BUFFER_SIZE) && (pos+len <= LTC2656_BUFFER_SIZE))	//check if expected write is within buffer A
-#define IS_WRITE_BUFFER_B(pos, len) ((pos >  LTC2656_BUFFER_SIZE) && (pos+len >  LTC2656_BUFFER_SIZE))
+#define OFFSET_A 	0
+#define OFFSET_B	LTC2656_BUFFER_SIZE
 
 #define IS_SPI_BUFFER_A       ((buffer_index * 64) < LTC2656_BUFFER_SIZE)
-#define IS_SPI_BUFFER_B       ((buffer_index * 64) > LTC2656_BUFFER_SIZE)
+#define IS_SPI_BUFFER_B       ((buffer_index * 64) >= LTC2656_BUFFER_SIZE)
 
-#define IS_BUFFER_AVAILABLE(poj,len) !((IS_WRITE_BUFFER_A(poj, len) && IS_SPI_BUFFER_A) || (IS_WRITE_BUFFER_B(poj, len) && IS_SPI_BUFFER_B))
+#define IS_BUFFER_AVAILABLE(a,b)  (((b < LTC2656_BUFFER_SIZE ) && IS_SPI_BUFFER_A) || (( a < LTC2656_BUFFER_SIZE) && IS_SPI_BUFFER_B))
 
 #define IS_OUT_OF_BOUNDS(pos,len) ((( pos < LTC2656_BUFFER_SIZE) && ((pos+len) > LTC2656_BUFFER_SIZE)) || ((pos >= (LTC2656_BUFFER_SIZE)) && ((pos+len)> (LTC2656_BUFFER_SIZE *2))))
 
@@ -150,7 +151,17 @@ static void work_func(struct work_struct *work)
 
 	if (last_spi_write_buffer != IS_SPI_BUFFER_A)
 	{
-		wake_up_interruptible(&write_wait_queue);
+
+	    if (IS_SPI_BUFFER_A)
+	    {
+		available_b = 0; // just consumed b buffer so set available to sero
+	    }
+	    else
+	    {
+		available_a = 0;
+	    }
+
+            wake_up_interruptible(&write_wait_queue);
 	}
 
 	last_spi_write_buffer = IS_SPI_BUFFER_A;
@@ -202,29 +213,47 @@ static int dev_release(struct inode *inode, struct file *filep)
 static ssize_t dev_write(struct file *filep, const char *buffer, size_t len, loff_t *offset)
 {
 	struct mmap_info *info;
+	size_t write_size;
+	size_t total_write = len;
+	size_t buffer_offset = 0;
+        info = filep->private_data;
 
-	info = filep->private_data;
-
-	if(IS_OUT_OF_BOUNDS(filep->f_pos, len))
+	while (total_write)
 	{
-		printk(KERN_INFO "LTC2656: Write Out of bounds\n");
-		return -ENOSPC;
+        	wait_event_interruptible(write_wait_queue, IS_BUFFER_AVAILABLE(available_a, available_b));
+		if ((available_a < LTC2656_BUFFER_SIZE) && IS_SPI_BUFFER_B)
+		{
+	     	   write_size =  (size_t)min(len, LTC2656_BUFFER_SIZE - available_a);
+             	   if (copy_from_user(info->data + OFFSET_A + available_a, buffer + buffer_offset , write_size))
+	     	   {
+                	return -EFAULT;
+	     	   }
+	     	   else
+	     	   {
+			buffer_offset += write_size;
+			available_a += write_size;
+			total_write -= write_size;
+	     	   }
+		}
+
+                if ((available_b < LTC2656_BUFFER_SIZE) && IS_SPI_BUFFER_A)
+		{
+             	   write_size =  (size_t)min(len, LTC2656_BUFFER_SIZE - available_b);
+                   if (copy_from_user(info->data + OFFSET_B + available_b, buffer + buffer_offset , write_size))
+                   {
+                	return -EFAULT;
+                   }
+                   else
+                   {
+			buffer_offset += write_size;
+			available_b += write_size;
+                        total_write -= write_size;
+                   }
+
+	        }
 	}
 
-	wait_event_interruptible(write_wait_queue, IS_BUFFER_AVAILABLE(filep->f_pos, len));
-
-	if (copy_from_user(info->data + (filep->f_pos), buffer , min(len, (size_t)LTC2656_BUFFER_SIZE)))
-	{
-		return -EFAULT;
-	}
-	else
-	{
-		*offset += len;
-		filep->f_pos += len;
-		return len;
-	}
-
-
+	return len;
 }
 
 
