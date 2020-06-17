@@ -36,7 +36,7 @@
 #define IRQ_GPIO 	23 //standard gpio number
 #define OUT_GPIO 	24
 #define LDAC_GPIO 	5
-#define CLR_GPIO	6
+#define CLR_GPIO	6 //inverted logic
 
 #define LTC2656_MAX_DAC_CHANNELS	32
 
@@ -51,13 +51,13 @@
 
 #define LTC2656_CMD_WRITE_INPUT_N 				0x0
 #define LTC2656_CMD_UPDATE_DAC_N				0x1
-#define LTC2656_CMD_WRITE_INPUT_N_UPDATE_ALL	0x2
-#define LTC2656_CMD_WRITE_INPUT_N_UPDATE_N		0x3
+#define LTC2656_CMD_WRITE_INPUT_N_UPDATE_ALL			0x2
+#define LTC2656_CMD_WRITE_INPUT_N_UPDATE_N			0x3
 #define LTC2656_CMD_POWERDOWN_N					0x4
 #define LTC2656_CMD_POWERDOWN_CHIP				0x5
-#define LTC2656_CMD_SELECT_INTERNAL_REFERENCE	0x6
-#define LTC2656_CMD_SELECT_EXTERNAL_REFERENCE	0x7
-#define LTC2656_CMD_NOP							0xF
+#define LTC2656_CMD_SELECT_INTERNAL_REFERENCE			0x6
+#define LTC2656_CMD_SELECT_EXTERNAL_REFERENCE			0x7
+#define LTC2656_CMD_NOP						0xF
 
 
 static unsigned int irqNumber;
@@ -297,21 +297,44 @@ loff_t dev_llseek(struct file *filp, loff_t off, int whence)
 	return newpos;
 }
 
+static int ltc2656_spi_write_cmd(uint32_t cmd, uint64_t *val)
+{
+        uint32_t i;
+        struct spi_device *spi = to_spi_device(st.dev);
+        spi->controller->rt = true;
+        spi->max_speed_hz = 40000000;
 
-static int ltc2656_spi_write(uint32_t cmd, uint64_t *val)
+        for(i=0; i<8; i = i+1)
+        {
+                st.data.spi[(i*8) + 0] = cpu_to_be32(LTC2656_CMD(cmd) |  LTC2656_ADDR(i & 0x7) | (uint16_t)LTC2656_VAL1( *(val+ i)) );
+                st.data.spi[(i*8) + 1] = cpu_to_be32(LTC2656_CMD(cmd) |  LTC2656_ADDR(i & 0x7) | (uint16_t)LTC2656_VAL2( *(val+ i)) );
+                st.data.spi[(i*8) + 2] = cpu_to_be32(LTC2656_CMD(cmd) |  LTC2656_ADDR(i & 0x7) | (uint16_t)LTC2656_VAL3( *(val+ i)) );
+                st.data.spi[(i*8) + 3] = cpu_to_be32(LTC2656_CMD(cmd) |  LTC2656_ADDR(i & 0x7) | (uint16_t)LTC2656_VAL4( *(val+ i)) );
+        }
+
+        return spi_write(spi, &st.data.spi, sizeof(st.data.spi));
+}
+
+
+static int ltc2656_spi_write_sample(uint64_t *val)
 {
 	uint32_t i;
 	struct spi_device *spi = to_spi_device(st.dev);
 	spi->controller->rt = true;
 	spi->max_speed_hz = 40000000;
 
-	for(i=0; i<8; i = i+1)
+	for(i=0; i<7; i = i+1)
 	{
-		st.data.spi[(i*8) + 0] = cpu_to_be32(LTC2656_CMD(cmd) |  LTC2656_ADDR(i & 0x7) | (uint16_t)LTC2656_VAL1( *(val+ i)) );
-		st.data.spi[(i*8) + 1] = cpu_to_be32(LTC2656_CMD(cmd) |  LTC2656_ADDR(i & 0x7) | (uint16_t)LTC2656_VAL2( *(val+ i)) );
-		st.data.spi[(i*8) + 2] = cpu_to_be32(LTC2656_CMD(cmd) |  LTC2656_ADDR(i & 0x7) | (uint16_t)LTC2656_VAL3( *(val+ i)) );
-		st.data.spi[(i*8) + 3] = cpu_to_be32(LTC2656_CMD(cmd) |  LTC2656_ADDR(i & 0x7) | (uint16_t)LTC2656_VAL4( *(val+ i)) );
+		st.data.spi[(i*8) + 0] = cpu_to_be32(LTC2656_CMD(LTC2656_CMD_WRITE_INPUT_N) |  LTC2656_ADDR(i & 0x7) | (uint16_t)LTC2656_VAL1( *(val+ i)) );
+		st.data.spi[(i*8) + 1] = cpu_to_be32(LTC2656_CMD(LTC2656_CMD_WRITE_INPUT_N) |  LTC2656_ADDR(i & 0x7) | (uint16_t)LTC2656_VAL2( *(val+ i)) );
+		st.data.spi[(i*8) + 2] = cpu_to_be32(LTC2656_CMD(LTC2656_CMD_WRITE_INPUT_N) |  LTC2656_ADDR(i & 0x7) | (uint16_t)LTC2656_VAL3( *(val+ i)) );
+		st.data.spi[(i*8) + 3] = cpu_to_be32(LTC2656_CMD(LTC2656_CMD_WRITE_INPUT_N) |  LTC2656_ADDR(i & 0x7) | (uint16_t)LTC2656_VAL4( *(val+ i)) );
 	}
+
+ 		st.data.spi[(i*8) + 0] = cpu_to_be32(LTC2656_CMD(LTC2656_CMD_WRITE_INPUT_N_UPDATE_ALL) |  LTC2656_ADDR(i & 0x7) | (uint16_t)LTC2656_VAL1( *(val+ i)) );
+                st.data.spi[(i*8) + 1] = cpu_to_be32(LTC2656_CMD(LTC2656_CMD_WRITE_INPUT_N_UPDATE_ALL) |  LTC2656_ADDR(i & 0x7) | (uint16_t)LTC2656_VAL2( *(val+ i)) );
+                st.data.spi[(i*8) + 2] = cpu_to_be32(LTC2656_CMD(LTC2656_CMD_WRITE_INPUT_N_UPDATE_ALL) |  LTC2656_ADDR(i & 0x7) | (uint16_t)LTC2656_VAL3( *(val+ i)) );
+                st.data.spi[(i*8) + 3] = cpu_to_be32(LTC2656_CMD(LTC2656_CMD_WRITE_INPUT_N_UPDATE_ALL) |  LTC2656_ADDR(i & 0x7) | (uint16_t)LTC2656_VAL4( *(val+ i)) );
 
 	return spi_write(spi, &st.data.spi, sizeof(st.data.spi));
 }
@@ -321,7 +344,7 @@ static int ltc2656_sample_write( void )
 {
 
 	uint64_t *sample = (uint64_t *)(((ltc2656_slice_t *)ltc2656_sample_buffer) + buffer_index);
-	ltc2656_spi_write(LTC2656_CMD_WRITE_INPUT_N_UPDATE_N, sample);
+	ltc2656_spi_write_sample(sample);
 
 	return 0;
 }
@@ -339,7 +362,7 @@ static int ltc2656_probe(struct device *dev)
 {
 	st.dev = dev;
 
-	ltc2656_spi_write(LTC2656_CMD_SELECT_INTERNAL_REFERENCE, ((uint64_t *)( &st.data.spi))); //init all DAC to internal referece data does not matter
+	ltc2656_spi_write_cmd(LTC2656_CMD_SELECT_INTERNAL_REFERENCE, ((uint64_t *)( &st.data.spi))); //init all DAC to internal referece data does not matter
 	return 0;
 }
 
@@ -447,6 +470,11 @@ static int __init ltc2656_init(void)
 	gpio_set_value(CLR_GPIO, false);
 	result |= gpio_export(CLR_GPIO, false);
 
+        result |= gpio_request(LDAC_GPIO, "DAC_LDAC");
+        result |= gpio_direction_output(LDAC_GPIO, false);
+        gpio_set_value(LDAC_GPIO, true);
+        result |= gpio_export(LDAC_GPIO, false);
+
 
 	if (result == 0)
 	{
@@ -473,6 +501,9 @@ static void __exit ltc2656_exit(void)
 	gpio_set_value(CLR_GPIO, 0);
 	gpio_unexport(CLR_GPIO);
 	gpio_free(CLR_GPIO);
+        gpio_set_value(LDAC_GPIO, 0);
+        gpio_unexport(LDAC_GPIO);
+        gpio_free(LDAC_GPIO);
 	gpio_set_value(OUT_GPIO, 0);
 	gpio_unexport(OUT_GPIO);
 	gpio_free(OUT_GPIO);
