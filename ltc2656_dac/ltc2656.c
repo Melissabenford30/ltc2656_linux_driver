@@ -488,7 +488,7 @@ static int __init ltc2656_init(void)
 	}
 
 
-	printk(KERN_INFO "LTC2656: DAC Created\n");
+	printk(KERN_INFO "LTC2656: DAC Created V1.0\n");
 	return 0;
 }
 module_init(ltc2656_init);
